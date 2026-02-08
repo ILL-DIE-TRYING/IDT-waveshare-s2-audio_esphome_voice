@@ -1,6 +1,5 @@
 substitutions:
-  device_name: esp32-audio-s3
-  friendly: Waveshare-Audio-3
+  device_name: espaudios3
   
   # Phases of the Voice Assistant
   voice_assist_idle_phase_id: '1' # ready to be triggered by a wake word
@@ -51,7 +50,8 @@ substitutions:
 
 esphome:
   name: $device_name
-  friendly_name: $friendly
+  build_path: "./build"
+  friendly_name: Waveshare-Audio-3
   min_version: 2025.8.0
   on_boot:
     - priority: -100
@@ -85,7 +85,7 @@ esphome:
             id(alarm_time).publish_state(id(saved_alarm_time));
         - lambda: |-
             auto call = id(alarm_action).make_call();
-            call.set_option(id(saved_alarm_action));
+            call.set_option(id(saved_alarm_action).c_str());
             call.perform();
         - lambda: |-
             setenv("TZ", id(saved_time_zone).c_str(), 1);
@@ -116,7 +116,7 @@ esp32:
 
 wifi:
   id: wifi_id
-  fast_connect: ${hidden_ssid}
+  fast_connect: true
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   power_save_mode: none  # Disable power saving for better performance
@@ -181,7 +181,7 @@ api:
     - script.execute: control_leds
 
   encryption:
-    key: !secret api_esp32-audio-s3
+    key: !secret api_esp32_audio_s3
 
 # http_request: 
 #   verify_ssl: false
@@ -189,7 +189,7 @@ api:
 ota:
   - platform: esphome
     id: ota_esphome
-    password: !secret ota_password
+    password: !secret esp32s2_ota_password
 
 i2c:
   - id: internal_i2c
@@ -236,20 +236,14 @@ light:
     effects:
       - pulse:
           name: "Pulse Slow"
-          min_brightness: 30%
-          max_brightness: 100%
           transition_length: 1000ms
           update_interval: 16ms
       - pulse:
           name: "Pulse Medium"
-          min_brightness: 30%
-          max_brightness: 100%
           transition_length: 600ms
           update_interval: 16ms
       - pulse:
           name: "Pulse Fast"
-          min_brightness: 30%
-          max_brightness: 100%
           transition_length: 300ms
           update_interval: 16ms
       - addressable_rainbow:
@@ -258,6 +252,23 @@ light:
           width: 7
       - addressable_color_wipe:
           name: "Wipe"
+      - addressable_lambda:
+          name: "Thinking Wipe"
+          update_interval: 150ms
+          lambda: |-
+            static int step = 0;
+            if (initial_run) step = 0;
+            it.all() = Color::BLACK;
+            // Use the global variables to define the color of the wipe
+            Color thinking_color = Color(
+              uint8_t(id(led_ring_color_r) * 255),
+              uint8_t(id(led_ring_color_g) * 255),
+              uint8_t(id(led_ring_color_b) * 255)
+            );
+            for (int i = 0; i <= step; i++) {
+              it[i] = thinking_color;
+            }
+            step = (step + 1) % it.size();
 
 i2s_audio:
   - id: i2s_output
@@ -376,9 +387,9 @@ media_player:
     id: external_media_player
     name: None
     internal: False
-    volume_increment: 0.01
+    volume_increment: 0.1
     volume_min: 0.4
-    volume_max: 0.8
+    volume_max: 1.0
     announcement_pipeline:
       speaker: announcement_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec
@@ -449,7 +460,6 @@ media_player:
 voice_assistant:
   id: va
   microphone:
-    id: va_mic
     microphone: i2s_mics
     #channels: 1 #Right
     #channels: 0 #Left
@@ -818,13 +828,13 @@ script:
           // Voice assistant phases
           switch (phase) {
             case ${voice_assist_waiting_for_command_phase_id}: // just woke
-              set("solid", 0.5, 0.0, 0.5);  // calm solid violet
+              set("solid", 0.2, 0.0, 0.5);  // calm solid violet
               return;
             case ${voice_assist_listening_for_command_phase_id}:
-              set("Pulse Medium", 0.8, 0.0, 0.8);
+              set("Pulse Medium", 0.6, 0.0, 0.8);
               return;
             case ${voice_assist_thinking_phase_id}:
-              set("Pulse Slow", 0.6, 0.0, 0.6);
+              set("Thinking Wipe", 0.0, 0.0, 1.0);
               return;
             case ${voice_assist_replying_phase_id}:
               set("Wipe", 0.6, 0.0, 0.6);
@@ -847,19 +857,22 @@ script:
           // Idle
           set("off", 0, 0, 0);
 
-  # Brief green pulse when volume changes, then restore
+  # Volume Bar Visualization
   - id: control_leds_volume_changed
     mode: restart
     then:
-      - light.turn_on:
-          id: status_ring
-          brightness: !lambda 'return id(led_ring_brightness).state;'
-          red: 0.0
-          green: 1.0
-          blue: 0.0
-          effect: "Pulse Fast"
       - lambda: |-
-          ESP_LOGD("led", "volume_changed: flash green"); //DEBUG
+          float vol = id(external_media_player).volume;
+          int num_leds = round(vol * 7.0f);
+          auto it = static_cast<AddressableLight *>(id(status_ring).get_output());
+          for (int i = 0; i < 7; i++) {
+            if (i < num_leds) {
+              (*it)[i] = Color(51, 0, 127); 
+            } else {
+              (*it)[i] = Color(0, 0, 0);
+            }
+          }
+          it->schedule_show();
       - delay: 1.2s
       - script.execute: control_leds
 
@@ -979,7 +992,7 @@ script:
 
               auto time_now = id(rtc).now();
               if (time_now.hour == alarm_hour && time_now.minute == alarm_minute) {
-                auto action = id(alarm_action).state;
+                std::string action = id(alarm_action)->current_option();
                 if (action == "Play sound") {
                   id(timer_ringing).turn_on();
                 } else if (action == "Send event") {
@@ -1120,7 +1133,7 @@ switch:
   - platform: template
     id: mute_sound
     name: Mute/unmute sound
-    icon: "mdi:bullhorn"
+    icon: mdi:bullhorn
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
@@ -1128,7 +1141,7 @@ switch:
   - platform: template
     id: wake_sound
     name: Wake sound
-    icon: "mdi:bullhorn"
+    icon: mdi:bullhorn
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
@@ -1190,38 +1203,6 @@ number:
       - logger.log:
           format: "[MIC] Set ES7210 gain to %.0f dB"
           args: ["x"]
-          
-    - platform: template
-    id: va_gain_factor
-    name: "Gain Factor"
-    entity_category: config
-    min_value: 1
-    max_value: 64
-    step: 1
-    restore_value: true
-    initial_value: 32
-    set_action:
-      - lambda: |-
-          id(va_mic).set_gain_factor(x);   // adjust gain factor on the fly
-      - logger.log:
-          format: "[MIC] Set gain factor to %.0f"
-          args: ["x"]
-
-  - platform: template
-    id: va_noise_suppression
-    name: "Noise Suppression"
-    entity_category: config
-    min_value: 0
-    max_value: 4
-    step: 1
-    restore_value: true
-    initial_value: 4
-    set_action:
-      - lambda: |-
-          id(va).set_noise_suppression_level(x);   // adjust noise suppression on the fly
-      - logger.log:
-          format: "[MIC] Set suppression to %.0f"
-          args: ["x"]
 
   - platform: template
     id: led_ring_brightness
@@ -1254,14 +1235,14 @@ sensor:
     disabled_by_default: true
     device_class: duration
     unit_of_measurement: s
-    icon: "mdi:timer"
+    icon: mdi:timer
     accuracy_decimals: 0
 
 text_sensor:
   - platform: template
     id: next_timer_name
     name: "Next timer name"
-    icon: "mdi:timer"
+    icon: mdi:timer
     disabled_by_default: true
   - platform: template
     name: "Alarm time"
@@ -1283,7 +1264,7 @@ button:
     name: "Restart"
     entity_category: config
     disabled_by_default: true
-    icon: "mdi:restart"
+    icon: mdi:restart
 
 binary_sensor:
   - platform: gpio
@@ -1293,7 +1274,9 @@ binary_sensor:
       number: 9 # not '12' as schematics say!
       inverted: true
     on_press:
-      - media_player.volume_down: external_media_player
+      - lambda: |-
+          float vol = id(external_media_player).volume;
+          id(external_media_player).make_call().set_volume(max(0.0f, vol - 0.1f)).perform();
 
   - platform: gpio
     name: "Key2"
@@ -1311,4 +1294,6 @@ binary_sensor:
       number: 11
       inverted: true
     on_press:
-      - media_player.volume_up: external_media_player
+      - lambda: |-
+          float vol = id(external_media_player).volume;
+          id(external_media_player).make_call().set_volume(min(1.0f, vol + 0.1f)).perform();
