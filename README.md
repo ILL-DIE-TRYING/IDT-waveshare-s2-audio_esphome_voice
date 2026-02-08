@@ -1,5 +1,14 @@
 Just to be sure it is known. This just a copy of https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice so I can tinker with code easier.
-Currently my yaml is definitely different. Light interaction adjustment. Mine goes blue when wake word detected, purple when it actually hears a response, pulsing blue while it is thinking and rainbow while it speaks.
+Currently my yaml is definitely different. 
+
+1. Light interaction adjustment
+   Blue when wake word detected
+   purple when it actually hears a response
+   Rotating and fading blue while it is thinking
+   rainbow while it speaks.
+2. Volume Adjustment now moves the volume 10% per button press
+3. Lights show what volume is set at while adjusting
+4. I implemented the esphome secrets.yaml for the wifi, ota, and api variables
 
 ESPHome configuration for enabeling WAVESHARE-S3-AUDIO-BOARD (https://www.waveshare.com/esp32-s3-audio-board.htm)
 to be used as a HomeAssistant Voice Satellite. Features such as simultanious music/and announcements and
